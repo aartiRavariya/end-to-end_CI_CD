@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fastapi-sa
+  namespace: ml-project
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fastapi-role
+  namespace: ml-project
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fastapi-rolebinding
+  namespace: ml-project
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fastapi-role
+subjects:
+- kind: ServiceAccount
+  name: fastapi-sa
+  namespace: ml-project
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: streamlit-sa
+  namespace: ml-project
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: streamlit-role
+  namespace: ml-project
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: streamlit-rolebinding
+  namespace: ml-project
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: streamlit-role
+subjects:
+- kind: ServiceAccount
+  name: streamlit-sa
+  namespace: ml-project

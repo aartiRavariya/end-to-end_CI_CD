@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamlit-deployment
+  namespace: ml-project
+  labels:
+    app: streamlit
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: streamlit
+  template:
+    metadata:
+      labels:
+        app: streamlit
+        version: v1
+    spec:
+      serviceAccountName: streamlit-sa
+      containers:
+      - name: streamlit
+        image: dockerhub_username/streamlit-ml-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8501
+          protocol: TCP
+        env:
+        - name: FASTAPI_URL
+          valueFrom:
+            configMapKeyRef:
+              name: ml-config
+              key: FASTAPI_URL
+        
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: false

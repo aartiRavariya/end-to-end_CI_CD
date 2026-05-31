@@ -1,0 +1,159 @@
+name: CI/CD Pipeline - Build & Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: docker.io
+  FASTAPI_IMAGE: fastapi-ml-service
+  STREAMLIT_IMAGE: streamlit-ml-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Extract metadata (tags, labels)
+      id: meta-fastapi
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.FASTAPI_IMAGE }}
+        tags: |
+          type=ref,event=branch
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Extract metadata (tags, labels) for Streamlit
+      id: meta-streamlit
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.STREAMLIT_IMAGE }}
+        tags: |
+          type=ref,event=branch
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push FastAPI image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./fastapi-app
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        tags: ${{ steps.meta-fastapi.outputs.tags }}
+        labels: ${{ steps.meta-fastapi.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push Streamlit image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./streamlit-app
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        tags: ${{ steps.meta-streamlit.outputs.tags }}
+        labels: ${{ steps.meta-streamlit.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Update Kubernetes manifests with new image tags
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        # Extract image digests/tags
+        FASTAPI_TAG=$(echo "${{ steps.meta-fastapi.outputs.tags }}" | head -n1)
+        STREAMLIT_TAG=$(echo "${{ steps.meta-streamlit.outputs.tags }}" | head -n1)
+        
+        echo "Updating manifests with:"
+        echo "FastAPI: $FASTAPI_TAG"
+        echo "Streamlit: $STREAMLIT_TAG"
+        
+        # Update FastAPI deployment
+        sed -i "s|image: dockerhub_username/fastapi-ml-service:.*|image: $FASTAPI_TAG|g" k8s/fastapi-deployment.yaml
+        
+        # Update Streamlit deployment
+        sed -i "s|image: dockerhub_username/streamlit-ml-frontend:.*|image: $STREAMLIT_TAG|g" k8s/streamlit-deployment.yaml
+
+    - name: Commit and push manifest updates
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add k8s/*.yaml
+        
+        if git diff --quiet --cached; then
+          echo "No changes to commit"
+        else
+          git commit -m "ci: Update Kubernetes manifests with new image tags [skip ci]"
+          git push
+        fi
+
+  scan-images:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner on FastAPI
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.FASTAPI_IMAGE }}:latest
+        format: 'sarif'
+        output: 'trivy-fastapi.sarif'
+
+    - name: Run Trivy vulnerability scanner on Streamlit
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.STREAMLIT_IMAGE }}:latest
+        format: 'sarif'
+        output: 'trivy-streamlit.sarif'
+
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-*.sarif'
+
+  deploy-argocd:
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Notify Argo CD to sync
+      run: |
+        echo "Argo CD would be triggered here to sync the repository"
+        echo "Command: argocd app sync ml-project-app"
+        
+        # Uncomment to use Argo CD CLI in your workflow:
+        # argocd login ${{ secrets.ARGOCD_SERVER }} --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --insecure
+        # argocd app sync ml-project-app

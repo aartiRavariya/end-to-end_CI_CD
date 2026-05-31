@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ml-project-app
+  namespace: argocd
+  # Finalizers ensure that the application is not deleted without proper cleanup
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  # Project name
+  project: default
+
+  # Source repository and configuration
+  source:
+    repoURL: https://github.com/aartiRavariya/end-to-end_CI_CD
+    targetRevision: main
+    path: k8s
+
+  # Destination cluster and namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ml-project
+
+  # Sync policy
+  syncPolicy:
+    # Automatically sync when changes are detected
+    automated:
+      prune: true    # Delete resources that are no longer in Git
+      selfHeal: true # Auto-sync when cluster diverges from Git
+    
+    # Sync options
+    syncOptions:
+    - CreateNamespace=true
+    
+    # Retry policy
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Notification settings
+  info:
+  - name: 'Documentation'
+    value: 'https://github.com/aartiRavariya/end-to-end_CI_CD/blob/main/README.md'
+  - name: 'Repository'
+    value: 'https://github.com/aartiRavariya/end-to-end_CI_CD'
+
+  # Revision History Limit
+  revisionHistoryLimit: 10

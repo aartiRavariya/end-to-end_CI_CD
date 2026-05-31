@@ -1,0 +1,90 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Metadata
+namespace: ml-project
+
+# Resources to include
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - rbac.yaml
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
+  - redis-statefulset.yaml
+  - redis-service.yaml
+  - fastapi-deployment.yaml
+  - fastapi-service.yaml
+  - streamlit-deployment.yaml
+  - streamlit-service.yaml
+  - ingress.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: ml-project
+  app.kubernetes.io/version: "1.0.0"
+  app.kubernetes.io/part-of: ml-deployment
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  deployment.strategy: rolling-update
+  backup.velero.io/backup-volumes: postgres-storage,redis-storage
+
+# Image replacements (use to override image versions)
+images:
+  - name: postgres
+    newName: postgres
+    newTag: "15-alpine"
+  - name: redis
+    newName: redis
+    newTag: "7-alpine"
+
+# ConfigMap generator for environment files
+configMapGenerator:
+  - name: ml-config
+    files:
+      - configmap.yaml
+    behavior: replace
+
+# Replicas (can be overridden)
+replicas:
+  - name: fastapi-deployment
+    count: 2
+  - name: streamlit-deployment
+    count: 1
+
+# Strategic merge patches
+patchesStrategicMerge:
+  - |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: fastapi-deployment
+    spec:
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxSurge: 1
+          maxUnavailable: 0
+
+# JSON 6902 patches (for more complex modifications)
+patchesJson6902: []
+
+# Variables for string replacement
+vars:
+  - name: NAMESPACE
+    objref:
+      kind: Namespace
+      name: ml-project
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  - name: SERVICE_ACCOUNT
+    objref:
+      kind: ServiceAccount
+      name: fastapi-sa
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
